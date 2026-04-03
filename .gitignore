@@ -1,0 +1,17 @@
+node_modules
+.next
+dist
+.turbo
+.env
+.env.local
+.env.production
+*.env
+
+# Prisma
+packages/database/prisma/migrations/*.sql
+
+# Misc
+.DS_Store
+*.log
+coverage
+.nyc_output

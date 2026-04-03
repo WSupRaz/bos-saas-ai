@@ -1,0 +1,523 @@
+// packages/database/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────
+// MULTI-TENANT: Organization
+// ─────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      Plan     @default(FREE)
+  settings  Json?    // { waPhoneId, waToken, emailDomain, timezone, ... }
+  logoUrl   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users         User[]
+  leads         Lead[]
+  tasks         Task[]
+  reports       Report[]
+  messages      Message[]
+  orders        Order[]
+  automations   Automation[]
+  campaigns     Campaign[]
+  rates         MarketRate[]
+  inventory     InventoryItem[]
+  subscription  Subscription?
+  notifications Notification[]
+  templates     MessageTemplate[]
+
+  @@map("organizations")
+}
+
+// ─────────────────────────────────────────────────────────
+// AUTH: User + Session + PasswordReset
+// ─────────────────────────────────────────────────────────
+
+model User {
+  id             String     @id @default(cuid())
+  email          String     @unique
+  name           String
+  passwordHash   String
+  phone          String?
+  avatarUrl      String?
+  role           Role       @default(EMPLOYEE)
+  status         UserStatus @default(ACTIVE)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lastLoginAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  sessions        Session[]
+  passwordResets  PasswordReset[]
+  assignedTasks   Task[]         @relation("TaskAssignee")
+  createdTasks    Task[]         @relation("TaskCreator")
+  reports         Report[]
+  notifications   Notification[]
+  leadActivities  Activity[]
+
+  @@index([organizationId])
+  @@index([email])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("password_resets")
+}
+
+// ─────────────────────────────────────────────────────────
+// CRM: Lead + Activity
+// ─────────────────────────────────────────────────────────
+
+model Lead {
+  id             String     @id @default(cuid())
+  name           String
+  phone          String?
+  email          String?
+  company        String?
+  status         LeadStatus @default(NEW)
+  source         String?    // "website", "whatsapp", "referral", "manual"
+  tags           String[]
+  notes          String?
+  value          Float?
+  followUpAt     DateTime?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignedToId   String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  activities Activity[]
+  messages   Message[]   @relation("LeadMessages")
+  tasks      Task[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, followUpAt])
+  @@map("leads")
+}
+
+model Activity {
+  id          String       @id @default(cuid())
+  leadId      String
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type        ActivityType
+  note        String?
+  outcome     String?
+  createdById String
+  createdBy   User         @relation(fields: [createdById], references: [id])
+  createdAt   DateTime     @default(now())
+
+  @@index([leadId])
+  @@map("activities")
+}
+
+// ─────────────────────────────────────────────────────────
+// MESSAGING: Message + MessageTemplate
+// ─────────────────────────────────────────────────────────
+
+model Message {
+  id             String        @id @default(cuid())
+  channel        Channel
+  direction      Direction
+  to             String
+  from           String
+  body           String
+  status         MessageStatus @default(PENDING)
+  externalId     String?       // WhatsApp message ID from Meta
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  leadId         String?
+  lead           Lead?         @relation("LeadMessages", fields: [leadId], references: [id])
+  campaignId     String?
+  campaign       Campaign?     @relation(fields: [campaignId], references: [id])
+  metadata       Json?         // raw webhook payload, error details
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId, channel, status])
+  @@index([organizationId, scheduledAt])
+  @@index([leadId])
+  @@map("messages")
+}
+
+model MessageTemplate {
+  id             String   @id @default(cuid())
+  name           String
+  channel        Channel
+  subject        String?  // for email
+  body           String   // supports {{variable}} syntax
+  variables      String[] // list of variable names used
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@unique([organizationId, name])
+  @@map("message_templates")
+}
+
+// ─────────────────────────────────────────────────────────
+// TASKS
+// ─────────────────────────────────────────────────────────
+
+model Task {
+  id             String     @id @default(cuid())
+  title          String
+  description    String?
+  status         TaskStatus @default(PENDING)
+  priority       Priority   @default(MEDIUM)
+  dueAt          DateTime?
+  completedAt    DateTime?
+  recurring      Json?      // { freq: "daily" | "weekly", days: [1,2,3], endDate?: string }
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assigneeId     String?
+  assignee       User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdById    String
+  createdBy      User       @relation("TaskCreator", fields: [createdById], references: [id])
+  leadId         String?
+  lead           Lead?      @relation(fields: [leadId], references: [id])
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, assigneeId])
+  @@index([organizationId, dueAt])
+  @@map("tasks")
+}
+
+// ─────────────────────────────────────────────────────────
+// REPORTS (Employee / Vendor / Distributor daily reports)
+// ─────────────────────────────────────────────────────────
+
+model Report {
+  id             String       @id @default(cuid())
+  type           ReportType
+  data           Json         // flexible structure per type
+  submittedById  String
+  submittedBy    User         @relation(fields: [submittedById], references: [id])
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  date           DateTime     @default(now())
+  source         ReportSource @default(APP)
+  parsedFromWA   Boolean      @default(false)
+  notes          String?
+
+  @@index([organizationId, type, date])
+  @@index([organizationId, submittedById])
+  @@map("reports")
+}
+
+// ─────────────────────────────────────────────────────────
+// ORDERS + INVENTORY
+// ─────────────────────────────────────────────────────────
+
+model Order {
+  id             String      @id @default(cuid())
+  orderNumber    String      @unique
+  status         OrderStatus @default(PENDING)
+  items          Json        // [{ name, qty, unit, price, inventoryItemId? }]
+  subtotal       Float
+  tax            Float       @default(0)
+  totalAmount    Float
+  notes          String?
+  vendorId       String?     // User id with role VENDOR
+  distributorId  String?     // User id with role DISTRIBUTOR
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([organizationId, status])
+  @@map("orders")
+}
+
+model InventoryItem {
+  id             String   @id @default(cuid())
+  name           String
+  sku            String?
+  description    String?
+  quantity       Float    @default(0)
+  unit           String   @default("units")
+  minThreshold   Float?   // alert when quantity falls below this
+  costPrice      Float?
+  sellingPrice   Float?
+  category       String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@map("inventory_items")
+}
+
+// ─────────────────────────────────────────────────────────
+// MARKET RATES (Mandi / Supplier rates)
+// ─────────────────────────────────────────────────────────
+
+model MarketRate {
+  id             String   @id @default(cuid())
+  item           String
+  rate           Float
+  unit           String
+  source         String   // "mandi" | supplier name | distributor name
+  sourceType     String   @default("supplier") // "mandi" | "supplier" | "distributor"
+  recordedAt     DateTime @default(now())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  submittedById  String?
+
+  @@index([organizationId, item, recordedAt])
+  @@map("market_rates")
+}
+
+// ─────────────────────────────────────────────────────────
+// AUTOMATION ENGINE
+// ─────────────────────────────────────────────────────────
+
+model Automation {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  active         Boolean  @default(true)
+  trigger        Json     // { event: "REPORT_MISSING", conditions: [{ field, operator, value }] }
+  actions        Json     // [{ type: "SEND_WHATSAPP", params: { to: "{{phone}}", message: "..." } }]
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  runCount       Int      @default(0)
+  lastRunAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId, active])
+  @@map("automations")
+}
+
+model AutomationLog {
+  id           String   @id @default(cuid())
+  automationId String
+  event        String
+  context      Json
+  success      Boolean
+  error        String?
+  executedAt   DateTime @default(now())
+
+  @@index([automationId])
+  @@map("automation_logs")
+}
+
+// ─────────────────────────────────────────────────────────
+// CAMPAIGNS (WhatsApp / Email bulk messaging)
+// ─────────────────────────────────────────────────────────
+
+model Campaign {
+  id             String         @id @default(cuid())
+  name           String
+  channel        Channel
+  status         CampaignStatus @default(DRAFT)
+  subject        String?        // email only
+  body           String
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  audience       Json           // { tags: ["vip"], segment: "leads", userIds?: [...] }
+  stats          Json?          // { total, sent, delivered, opened, clicked, failed }
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  messages Message[]
+
+  @@index([organizationId, status])
+  @@map("campaigns")
+}
+
+// ─────────────────────────────────────────────────────────
+// NOTIFICATIONS (in-app)
+// ─────────────────────────────────────────────────────────
+
+model Notification {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  body           String
+  type           String   @default("info") // "info" | "warning" | "error" | "success"
+  read           Boolean  @default(false)
+  link           String?
+  createdAt      DateTime @default(now())
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────────────
+// BILLING / SUBSCRIPTION
+// ─────────────────────────────────────────────────────────
+
+model Subscription {
+  id               String   @id @default(cuid())
+  organizationId   String   @unique
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan             Plan
+  status           String   @default("active") // "active" | "cancelled" | "past_due" | "trialing"
+  razorpaySubId    String?
+  stripeSubId      String?
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("subscriptions")
+}
+
+// ─────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  EMPLOYEE
+  DISTRIBUTOR
+  VENDOR
+}
+
+enum Plan {
+  FREE
+  STARTER
+  GROWTH
+  ENTERPRISE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum Channel {
+  WHATSAPP
+  EMAIL
+  SMS
+  IN_APP
+}
+
+enum Direction {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  PENDING
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum ReportType {
+  DAILY_WORK
+  VENDOR_RATE
+  DISTRIBUTOR_SALES
+  STOCK_UPDATE
+  EXPENSE
+}
+
+enum ReportSource {
+  APP
+  WHATSAPP
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  WHATSAPP
+  NOTE
+  MEETING
+  TASK
+}
