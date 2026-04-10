@@ -1,7 +1,7 @@
 // apps/web/app/(dashboard)/crm/page.tsx
 "use client";
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Plus, Search, Phone, Mail, Building2, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { useForm } from "react-hook-form";
@@ -27,14 +27,14 @@ export default function CRMPage() {
   const [status,  setStatus]  = useState("");
   const [showForm, setShowForm] = useState(false);
   const [page,    setPage]    = useState(1);
-
+  
   const { data, isLoading } = useQuery({
     queryKey: ["leads", search, status, page],
     queryFn: () =>
       api.get<{ data: Lead[]; total: number; pages: number }>("/api/leads", {
         params: { search: search || undefined, status: status || undefined, page },
       }).then((r) => r.data),
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
   });
 
   const createMutation = useMutation({
