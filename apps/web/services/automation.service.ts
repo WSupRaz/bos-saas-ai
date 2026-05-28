@@ -86,7 +86,7 @@ export async function processAutomations(
           data: {
             automationId: automation.id,
             event,
-            context,
+            context: context as never,
             success: false,
             error: String(err),
           },
@@ -101,7 +101,7 @@ export async function processAutomations(
     });
 
     await prisma.automationLog.create({
-      data: { automationId: automation.id, event, context, success: true },
+      data: { automationId: automation.id, event, context: context as never, success: true },
     });
   }
 }

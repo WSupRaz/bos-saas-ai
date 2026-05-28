@@ -42,8 +42,9 @@ export default function AIChatPage() {
         messages: next.map((m) => ({ role: m.role, content: m.content })),
       });
       setMessages([...next, { role: "assistant", content: data.reply ?? "Sorry, I couldn't get a response." }]);
-    } catch {
-      toast.error("AI request failed. Check your OpenAI API key.");
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg ?? "AI is busy — free models are rate-limited. Retry in a few seconds.");
       setMessages((m) => m.slice(0, -1));
     } finally {
       setLoading(false);
@@ -67,10 +68,11 @@ export default function AIChatPage() {
           </div>
           <div>
             <h1 className="font-bold text-gray-900">AI Business Assistant</h1>
-            <p className="text-xs text-gray-500">Powered by GPT-4o · Has access to your live data</p>
+            <p className="text-xs text-gray-500">Powered by AI · Has access to your live data</p>
           </div>
         </div>
         <button
+          type="button"
           onClick={() => setMessages([])}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50"
         >
@@ -92,6 +94,7 @@ export default function AIChatPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
               {QUICK_PROMPTS.map((p) => (
                 <button
+                  type="button"
                   key={p}
                   onClick={() => send(p)}
                   className="text-left px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
@@ -135,9 +138,12 @@ export default function AIChatPage() {
             </div>
             <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-bl-sm">
               <div className="flex gap-1.5 items-center h-5">
-                {[0,1,2].map((i) => (
-                  <div key={i} className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                    style={{ animationDelay: `${i * 150}ms` }} />
+                {[
+                  "delay-0",
+                  "[animation-delay:150ms]",
+                  "[animation-delay:300ms]",
+                ].map((delay, i) => (
+                  <div key={i} className={`w-2 h-2 bg-gray-400 rounded-full animate-bounce ${delay}`} />
                 ))}
               </div>
             </div>
@@ -155,10 +161,11 @@ export default function AIChatPage() {
           onKeyDown={onKeyDown}
           placeholder="Ask about reports, rates, tasks, inventory…"
           rows={1}
-          className="flex-1 resize-none text-sm text-gray-800 placeholder-gray-400 focus:outline-none max-h-32 overflow-y-auto bg-transparent"
-          style={{ lineHeight: "1.5" }}
+          className="flex-1 resize-none text-sm leading-6 text-gray-800 placeholder-gray-400 focus:outline-none max-h-32 overflow-y-auto bg-transparent"
         />
         <button
+          type="button"
+          aria-label="Send message"
           onClick={() => send(input)}
           disabled={!input.trim() || loading}
           className="w-8 h-8 bg-blue-600 text-white rounded-xl flex items-center justify-center flex-shrink-0 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"

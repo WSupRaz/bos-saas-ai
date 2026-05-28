@@ -77,7 +77,7 @@ export async function POST(req: Request) {
       data: {
         ...body,
         dueAt:          body.dueAt ? new Date(body.dueAt) : null,
-        recurring:      body.recurring ?? null,
+        recurring:      (body.recurring ?? null) as never,
         organizationId: ctx.orgId,
         createdById:    ctx.userId,
       },

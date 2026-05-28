@@ -7,7 +7,7 @@ export function setupCrons(queue: Queue) {
     "daily-report-request",
     { type: "SEND_REPORT_REQUEST" },
     {
-      repeat: { cron: "0 8 * * *", tz: "Asia/Kolkata" },
+      repeat: { pattern: "0 8 * * *", tz: "Asia/Kolkata" },
       jobId: "cron-daily-report-request",
     }
   );
@@ -17,7 +17,7 @@ export function setupCrons(queue: Queue) {
     "followup-missing-reports",
     { type: "FOLLOWUP_MISSING_REPORTS" },
     {
-      repeat: { cron: "0 18 * * *", tz: "Asia/Kolkata" },
+      repeat: { pattern: "0 18 * * *", tz: "Asia/Kolkata" },
       jobId: "cron-followup-missing-reports",
     }
   );
@@ -27,7 +27,7 @@ export function setupCrons(queue: Queue) {
     "collect-market-rates",
     { type: "COLLECT_MARKET_RATES" },
     {
-      repeat: { cron: "0 7 * * *", tz: "Asia/Kolkata" },
+      repeat: { pattern: "0 7 * * *", tz: "Asia/Kolkata" },
       jobId: "cron-collect-market-rates",
     }
   );
@@ -37,7 +37,7 @@ export function setupCrons(queue: Queue) {
     "check-overdue-tasks",
     { type: "CHECK_OVERDUE_TASKS" },
     {
-      repeat: { cron: "0 0 * * *", tz: "Asia/Kolkata" },
+      repeat: { pattern: "0 0 * * *", tz: "Asia/Kolkata" },
       jobId: "cron-check-overdue-tasks",
     }
   );

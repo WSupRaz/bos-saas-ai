@@ -129,7 +129,7 @@ async function handleInboundMessage(
       await prisma.report.create({
         data: {
           type:           parsed.type,
-          data:           parsed.data,
+          data:           parsed.data as never,
           organizationId: orgId,
           submittedById:  userId ?? await getOrgOwner(orgId),
           source:         "WHATSAPP",

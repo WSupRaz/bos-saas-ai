@@ -4,7 +4,58 @@ import prisma from "@/lib/db";
 import { getAuthContext } from "@/lib/auth-context";
 import { requirePermission } from "@/lib/permissions";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// OpenRouter integration — uses the openai SDK with a custom baseURL.
+// Free-tier models are shared and can be rate-limited; the route tries them
+// in order and falls back to the next if a 429 is returned.
+const isOpenRouter = !!process.env.OPENROUTER_API_KEY;
+
+const openai = new OpenAI({
+  apiKey:   isOpenRouter ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY,
+  baseURL:  isOpenRouter ? "https://openrouter.ai/api/v1" : undefined,
+  defaultHeaders: isOpenRouter
+    ? {
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+        "X-Title":      "BOS — Business Operating System",
+      }
+    : undefined,
+});
+
+// Free model fallback chain — tried in order until one succeeds.
+// Set AI_MODEL env var to pin a specific model (e.g. "openai/gpt-4o-mini").
+const FREE_MODELS = [
+  "deepseek/deepseek-v4-flash:free",
+  "moonshotai/kimi-k2.6:free",
+  "google/gemma-4-26b-a4b-it:free",
+  "google/gemma-4-31b-it:free",
+];
+
+const PINNED_MODEL = process.env.AI_MODEL;
+const DEFAULT_MODEL = isOpenRouter ? FREE_MODELS[0] : "gpt-4o";
+
+// Try a completion with automatic free-model fallback on 429.
+async function completionWithFallback(
+  params: Parameters<typeof openai.chat.completions.create>[0]
+): Promise<OpenAI.Chat.ChatCompletion> {
+  if (!isOpenRouter || PINNED_MODEL) {
+    return openai.chat.completions.create({ ...params, model: PINNED_MODEL ?? DEFAULT_MODEL }) as Promise<OpenAI.Chat.ChatCompletion>;
+  }
+
+  for (const model of FREE_MODELS) {
+    try {
+      const result = await openai.chat.completions.create({ ...params, model }) as OpenAI.Chat.ChatCompletion;
+      return result;
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 429) {
+        console.warn(`[AI] ${model} rate-limited, trying next…`);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw Object.assign(new Error("All free AI models are currently rate-limited. Add credits on openrouter.ai or try again in a few seconds."), { status: 429 });
+}
 
 // ── Tool definitions ─────────────────────────────────────────
 const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
@@ -213,8 +264,15 @@ Always use available tools to fetch live data before answering questions about r
 Be concise, data-driven, and actionable. Respond in the same language the user writes in.
 When you find missing reports, low stock, or overdue tasks — always suggest a concrete next step.`;
 
-    let response = await openai.chat.completions.create({
-      model:       "gpt-4o",
+    if (!process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { error: "AI not configured. Add OPENROUTER_API_KEY to your environment variables." },
+        { status: 503 }
+      );
+    }
+
+    let response = await completionWithFallback({
+      model:       DEFAULT_MODEL,
       messages:    [{ role: "system", content: systemPrompt }, ...messages],
       tools:       TOOLS,
       tool_choice: "auto",
@@ -237,8 +295,8 @@ When you find missing reports, low stock, or overdue tasks — always suggest a 
         })
       );
 
-      response = await openai.chat.completions.create({
-        model:    "gpt-4o",
+      response = await completionWithFallback({
+        model:    DEFAULT_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           ...messages,

@@ -71,7 +71,7 @@ export async function POST(req: Request) {
     const report = await prisma.report.create({
       data: {
         type:           body.type,
-        data:           body.data,
+        data:           body.data as never,
         notes:          body.notes ?? null,
         date:           body.date ? new Date(body.date) : new Date(),
         submittedById:  ctx.userId,
