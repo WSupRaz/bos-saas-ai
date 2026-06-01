@@ -10,7 +10,7 @@ import { requirePermission } from "@/lib/permissions";
 const isOpenRouter = !!process.env.OPENROUTER_API_KEY;
 
 const openai = new OpenAI({
-  apiKey:   isOpenRouter ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY,
+  apiKey:  (isOpenRouter ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY) ?? "not-configured",
   baseURL:  isOpenRouter ? "https://openrouter.ai/api/v1" : undefined,
   defaultHeaders: isOpenRouter
     ? {
