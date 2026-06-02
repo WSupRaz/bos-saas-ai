@@ -23,10 +23,10 @@ const openai = new OpenAI({
 // Free model fallback chain — tried in order until one succeeds.
 // Set AI_MODEL env var to pin a specific model (e.g. "openai/gpt-4o-mini").
 const FREE_MODELS = [
-  "deepseek/deepseek-v4-flash:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
   "moonshotai/kimi-k2.6:free",
-  "google/gemma-4-26b-a4b-it:free",
   "google/gemma-4-31b-it:free",
+  "google/gemma-4-26b-a4b-it:free",
 ];
 
 const PINNED_MODEL = process.env.AI_MODEL;
@@ -46,8 +46,8 @@ async function completionWithFallback(
       return result;
     } catch (err) {
       const status = (err as { status?: number }).status;
-      if (status === 429) {
-        console.warn(`[AI] ${model} rate-limited, trying next…`);
+      if (status === 429 || status === 404) {
+        console.warn(`[AI] ${model} unavailable (${status}), trying next…`);
         continue;
       }
       throw err;
