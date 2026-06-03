@@ -4,21 +4,22 @@ import prisma from "@/lib/db";
 import { getAuthContext } from "@/lib/auth-context";
 import { requirePermission } from "@/lib/permissions";
 
-// Provider priority: OpenRouter → Google AI Studio (free) → OpenAI
+// Provider priority: Groq (free) → OpenRouter → Google AI → OpenAI
+const isGroq       = !!process.env.GROQ_API_KEY;
 const isOpenRouter = !!process.env.OPENROUTER_API_KEY;
 const isGoogle     = !!process.env.GOOGLE_AI_KEY;
 
 const openai = new OpenAI({
   apiKey: (
+    isGroq       ? process.env.GROQ_API_KEY :
     isOpenRouter ? process.env.OPENROUTER_API_KEY :
     isGoogle     ? process.env.GOOGLE_AI_KEY :
                    process.env.OPENAI_API_KEY
   ) ?? "not-configured",
-  baseURL: isOpenRouter
-    ? "https://openrouter.ai/api/v1"
-    : isGoogle
-    ? "https://generativelanguage.googleapis.com/v1beta/openai/"
-    : undefined,
+  baseURL: isGroq       ? "https://api.groq.com/openai/v1"
+         : isOpenRouter ? "https://openrouter.ai/api/v1"
+         : isGoogle     ? "https://generativelanguage.googleapis.com/v1beta/openai/"
+         : undefined,
   defaultHeaders: isOpenRouter
     ? {
         "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
@@ -28,8 +29,9 @@ const openai = new OpenAI({
 });
 
 const PINNED_MODEL  = process.env.AI_MODEL;
-const DEFAULT_MODEL = isOpenRouter ? "meta-llama/llama-3.3-70b-instruct:free"
-                    : isGoogle     ? "gemini-2.0-flash"
+const DEFAULT_MODEL = isGroq       ? "llama-3.3-70b-versatile"
+                    : isOpenRouter ? "meta-llama/llama-3.3-70b-instruct:free"
+                    : isGoogle     ? "gemini-1.5-flash"
                     : "gpt-4o-mini";
 
 async function completionWithFallback(
@@ -246,9 +248,9 @@ Always use available tools to fetch live data before answering questions about r
 Be concise, data-driven, and actionable. Respond in the same language the user writes in.
 When you find missing reports, low stock, or overdue tasks — always suggest a concrete next step.`;
 
-    if (!process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY && !process.env.GOOGLE_AI_KEY) {
+    if (!process.env.GROQ_API_KEY && !process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY && !process.env.GOOGLE_AI_KEY) {
       return Response.json(
-        { error: "AI not configured. Add GOOGLE_AI_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY to your environment variables." },
+        { error: "AI not configured. Add GROQ_API_KEY to your environment variables." },
         { status: 503 }
       );
     }
