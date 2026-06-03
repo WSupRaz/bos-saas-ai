@@ -36,7 +36,7 @@ const openai = new OpenAI({
 });
 
 const PINNED_MODEL  = process.env.AI_MODEL;
-const DEFAULT_MODEL = isCerebras   ? "llama-3.3-70b"
+const DEFAULT_MODEL = isCerebras   ? "gpt-oss-120b"
                     : isTogether   ? "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
                     : isDeepSeek   ? "deepseek-chat"
                     : isGroq       ? "llama-3.3-70b-versatile"
@@ -173,7 +173,7 @@ ${businessContext}`;
       const response = await openai.chat.completions.create({
         model:    PINNED_MODEL ?? DEFAULT_MODEL,
         messages: [{ role: "system", content: systemPrompt }, ...messages],
-        max_tokens: 1000,
+        max_tokens: 2000,
       }) as OpenAI.Chat.ChatCompletion;
       reply = response.choices[0].message.content ?? "Sorry, I couldn't get a response.";
     }
