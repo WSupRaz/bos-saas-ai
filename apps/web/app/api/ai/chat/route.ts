@@ -4,29 +4,28 @@ import prisma from "@/lib/db";
 import { getAuthContext } from "@/lib/auth-context";
 import { requirePermission } from "@/lib/permissions";
 
-// Provider priority: DeepSeek → Groq → OpenRouter → Google AI → OpenAI
+// Provider priority: Cerebras → Together AI → DeepSeek → Groq → OpenRouter → OpenAI
+const isCerebras   = !!process.env.CEREBRAS_API_KEY;
+const isTogether   = !!process.env.TOGETHER_API_KEY;
 const isDeepSeek   = !!process.env.DEEPSEEK_API_KEY;
 const isGroq       = !!process.env.GROQ_API_KEY;
 const isOpenRouter = !!process.env.OPENROUTER_API_KEY;
 const isGoogle     = !!process.env.GOOGLE_AI_KEY;
-const isHF         = !!process.env.HF_TOKEN;
-const isGitHub     = !!process.env.GITHUB_TOKEN;
 
 const openai = new OpenAI({
   apiKey: (
+    isCerebras   ? process.env.CEREBRAS_API_KEY :
+    isTogether   ? process.env.TOGETHER_API_KEY :
     isDeepSeek   ? process.env.DEEPSEEK_API_KEY :
     isGroq       ? process.env.GROQ_API_KEY :
     isOpenRouter ? process.env.OPENROUTER_API_KEY :
-    isHF         ? process.env.HF_TOKEN :
-    isGitHub     ? process.env.GITHUB_TOKEN :
-    isGoogle     ? process.env.GOOGLE_AI_KEY :
                    process.env.OPENAI_API_KEY
   ) ?? "not-configured",
-  baseURL: isDeepSeek   ? "https://api.deepseek.com/v1"
+  baseURL: isCerebras   ? "https://api.cerebras.ai/v1"
+         : isTogether   ? "https://api.together.xyz/v1"
+         : isDeepSeek   ? "https://api.deepseek.com/v1"
          : isGroq       ? "https://api.groq.com/openai/v1"
          : isOpenRouter ? "https://openrouter.ai/api/v1"
-         : isHF         ? "https://api-inference.huggingface.co/v1"
-         : isGitHub     ? "https://models.inference.ai.azure.com"
          : undefined,
   defaultHeaders: isOpenRouter
     ? {
@@ -37,11 +36,11 @@ const openai = new OpenAI({
 });
 
 const PINNED_MODEL  = process.env.AI_MODEL;
-const DEFAULT_MODEL = isDeepSeek   ? "deepseek-chat"
+const DEFAULT_MODEL = isCerebras   ? "llama-3.3-70b"
+                    : isTogether   ? "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+                    : isDeepSeek   ? "deepseek-chat"
                     : isGroq       ? "llama-3.3-70b-versatile"
                     : isOpenRouter ? "meta-llama/llama-3.3-70b-instruct:free"
-                    : isHF         ? "mistralai/Mistral-7B-Instruct-v0.3"
-                    : isGitHub     ? "gpt-4o-mini"
                     : "gpt-4o-mini";
 
 // ── Fetch live business data and build context string ─────────
@@ -126,7 +125,7 @@ export async function POST(req: Request) {
       messages: { role: "user" | "assistant"; content: string }[];
     };
 
-    if (!isDeepSeek && !isGroq && !isOpenRouter && !isHF && !isGitHub && !isGoogle && !process.env.OPENAI_API_KEY) {
+    if (!isCerebras && !isTogether && !isDeepSeek && !isGroq && !isOpenRouter && !isGoogle && !process.env.OPENAI_API_KEY) {
       return Response.json(
         { error: "AI not configured. Add GOOGLE_AI_KEY to your environment variables." },
         { status: 503 }
