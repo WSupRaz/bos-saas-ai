@@ -4,21 +4,24 @@ import prisma from "@/lib/db";
 import { getAuthContext } from "@/lib/auth-context";
 import { requirePermission } from "@/lib/permissions";
 
-// Provider priority: Groq (free) → OpenRouter → Google AI → OpenAI
+// Provider priority: Google AI (free) → GitHub Models (free) → Groq → OpenRouter → OpenAI
+const isGoogle     = !!process.env.GOOGLE_AI_KEY;
+const isGitHub     = !!process.env.GITHUB_TOKEN;
 const isGroq       = !!process.env.GROQ_API_KEY;
 const isOpenRouter = !!process.env.OPENROUTER_API_KEY;
-const isGoogle     = !!process.env.GOOGLE_AI_KEY;
 
 const openai = new OpenAI({
   apiKey: (
+    isGoogle     ? process.env.GOOGLE_AI_KEY :
+    isGitHub     ? process.env.GITHUB_TOKEN :
     isGroq       ? process.env.GROQ_API_KEY :
     isOpenRouter ? process.env.OPENROUTER_API_KEY :
-    isGoogle     ? process.env.GOOGLE_AI_KEY :
                    process.env.OPENAI_API_KEY
   ) ?? "not-configured",
-  baseURL: isGroq       ? "https://api.groq.com/openai/v1"
+  baseURL: isGoogle     ? "https://generativelanguage.googleapis.com/v1beta/openai/"
+         : isGitHub     ? "https://models.inference.ai.azure.com"
+         : isGroq       ? "https://api.groq.com/openai/v1"
          : isOpenRouter ? "https://openrouter.ai/api/v1"
-         : isGoogle     ? "https://generativelanguage.googleapis.com/v1beta/openai/"
          : undefined,
   defaultHeaders: isOpenRouter
     ? {
@@ -29,9 +32,10 @@ const openai = new OpenAI({
 });
 
 const PINNED_MODEL  = process.env.AI_MODEL;
-const DEFAULT_MODEL = isGroq       ? "llama-3.3-70b-versatile"
+const DEFAULT_MODEL = isGoogle     ? "gemini-1.5-flash"
+                    : isGitHub     ? "gpt-4o-mini"
+                    : isGroq       ? "llama-3.3-70b-versatile"
                     : isOpenRouter ? "meta-llama/llama-3.3-70b-instruct:free"
-                    : isGoogle     ? "gemini-1.5-flash"
                     : "gpt-4o-mini";
 
 async function completionWithFallback(
