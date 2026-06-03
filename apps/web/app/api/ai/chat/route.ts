@@ -21,7 +21,7 @@ const openai = new OpenAI({
                    process.env.OPENAI_API_KEY
   ) ?? "not-configured",
   baseURL: isHF         ? "https://api-inference.huggingface.co/v1"
-         : isGoogle     ? "https://generativelanguage.googleapis.com/v1beta/openai/"
+         : isGoogle     ? "https://generativelanguage.googleapis.com/v1beta/openai"
          : isGitHub     ? "https://models.inference.ai.azure.com"
          : isGroq       ? "https://api.groq.com/openai/v1"
          : isOpenRouter ? "https://openrouter.ai/api/v1"
