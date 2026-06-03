@@ -4,7 +4,8 @@ import prisma from "@/lib/db";
 import { getAuthContext } from "@/lib/auth-context";
 import { requirePermission } from "@/lib/permissions";
 
-// Provider priority: Google AI (free) → GitHub Models (free) → Groq → OpenRouter → OpenAI
+// Provider priority: HuggingFace → Google AI → GitHub → Groq → OpenRouter → OpenAI
+const isHF         = !!process.env.HF_TOKEN;
 const isGoogle     = !!process.env.GOOGLE_AI_KEY;
 const isGitHub     = !!process.env.GITHUB_TOKEN;
 const isGroq       = !!process.env.GROQ_API_KEY;
@@ -12,13 +13,15 @@ const isOpenRouter = !!process.env.OPENROUTER_API_KEY;
 
 const openai = new OpenAI({
   apiKey: (
+    isHF         ? process.env.HF_TOKEN :
     isGoogle     ? process.env.GOOGLE_AI_KEY :
     isGitHub     ? process.env.GITHUB_TOKEN :
     isGroq       ? process.env.GROQ_API_KEY :
     isOpenRouter ? process.env.OPENROUTER_API_KEY :
                    process.env.OPENAI_API_KEY
   ) ?? "not-configured",
-  baseURL: isGoogle     ? "https://generativelanguage.googleapis.com/v1beta/openai/"
+  baseURL: isHF         ? "https://api-inference.huggingface.co/v1"
+         : isGoogle     ? "https://generativelanguage.googleapis.com/v1beta/openai/"
          : isGitHub     ? "https://models.inference.ai.azure.com"
          : isGroq       ? "https://api.groq.com/openai/v1"
          : isOpenRouter ? "https://openrouter.ai/api/v1"
@@ -32,7 +35,8 @@ const openai = new OpenAI({
 });
 
 const PINNED_MODEL  = process.env.AI_MODEL;
-const DEFAULT_MODEL = isGoogle     ? "gemini-1.5-flash"
+const DEFAULT_MODEL = isHF         ? "mistralai/Mistral-7B-Instruct-v0.3"
+                    : isGoogle     ? "gemini-2.0-flash"
                     : isGitHub     ? "gpt-4o-mini"
                     : isGroq       ? "llama-3.3-70b-versatile"
                     : isOpenRouter ? "meta-llama/llama-3.3-70b-instruct:free"
@@ -120,7 +124,7 @@ export async function POST(req: Request) {
       messages: { role: "user" | "assistant"; content: string }[];
     };
 
-    if (!isGoogle && !isGitHub && !isGroq && !isOpenRouter && !process.env.OPENAI_API_KEY) {
+    if (!isHF && !isGoogle && !isGitHub && !isGroq && !isOpenRouter && !process.env.OPENAI_API_KEY) {
       return Response.json(
         { error: "AI not configured. Add GOOGLE_AI_KEY to your environment variables." },
         { status: 503 }
