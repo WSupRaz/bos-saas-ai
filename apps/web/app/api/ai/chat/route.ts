@@ -246,9 +246,9 @@ Always use available tools to fetch live data before answering questions about r
 Be concise, data-driven, and actionable. Respond in the same language the user writes in.
 When you find missing reports, low stock, or overdue tasks — always suggest a concrete next step.`;
 
-    if (!process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY) {
+    if (!process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY && !process.env.GOOGLE_AI_KEY) {
       return Response.json(
-        { error: "AI not configured. Add OPENROUTER_API_KEY to your environment variables." },
+        { error: "AI not configured. Add GOOGLE_AI_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY to your environment variables." },
         { status: 503 }
       );
     }
