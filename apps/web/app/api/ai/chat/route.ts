@@ -4,27 +4,29 @@ import prisma from "@/lib/db";
 import { getAuthContext } from "@/lib/auth-context";
 import { requirePermission } from "@/lib/permissions";
 
-// Provider priority: HuggingFace → Google AI → GitHub → Groq → OpenRouter → OpenAI
-const isHF         = !!process.env.HF_TOKEN;
-const isGoogle     = !!process.env.GOOGLE_AI_KEY;
-const isGitHub     = !!process.env.GITHUB_TOKEN;
+// Provider priority: DeepSeek → Groq → OpenRouter → Google AI → OpenAI
+const isDeepSeek   = !!process.env.DEEPSEEK_API_KEY;
 const isGroq       = !!process.env.GROQ_API_KEY;
 const isOpenRouter = !!process.env.OPENROUTER_API_KEY;
+const isGoogle     = !!process.env.GOOGLE_AI_KEY;
+const isHF         = !!process.env.HF_TOKEN;
+const isGitHub     = !!process.env.GITHUB_TOKEN;
 
 const openai = new OpenAI({
   apiKey: (
-    isHF         ? process.env.HF_TOKEN :
-    isGoogle     ? process.env.GOOGLE_AI_KEY :
-    isGitHub     ? process.env.GITHUB_TOKEN :
+    isDeepSeek   ? process.env.DEEPSEEK_API_KEY :
     isGroq       ? process.env.GROQ_API_KEY :
     isOpenRouter ? process.env.OPENROUTER_API_KEY :
+    isHF         ? process.env.HF_TOKEN :
+    isGitHub     ? process.env.GITHUB_TOKEN :
+    isGoogle     ? process.env.GOOGLE_AI_KEY :
                    process.env.OPENAI_API_KEY
   ) ?? "not-configured",
-  baseURL: isHF         ? "https://api-inference.huggingface.co/v1"
-         : isGoogle     ? "https://generativelanguage.googleapis.com/v1beta/openai"
-         : isGitHub     ? "https://models.inference.ai.azure.com"
+  baseURL: isDeepSeek   ? "https://api.deepseek.com/v1"
          : isGroq       ? "https://api.groq.com/openai/v1"
          : isOpenRouter ? "https://openrouter.ai/api/v1"
+         : isHF         ? "https://api-inference.huggingface.co/v1"
+         : isGitHub     ? "https://models.inference.ai.azure.com"
          : undefined,
   defaultHeaders: isOpenRouter
     ? {
@@ -35,11 +37,11 @@ const openai = new OpenAI({
 });
 
 const PINNED_MODEL  = process.env.AI_MODEL;
-const DEFAULT_MODEL = isHF         ? "mistralai/Mistral-7B-Instruct-v0.3"
-                    : isGoogle     ? "gemini-2.0-flash"
-                    : isGitHub     ? "gpt-4o-mini"
+const DEFAULT_MODEL = isDeepSeek   ? "deepseek-chat"
                     : isGroq       ? "llama-3.3-70b-versatile"
                     : isOpenRouter ? "meta-llama/llama-3.3-70b-instruct:free"
+                    : isHF         ? "mistralai/Mistral-7B-Instruct-v0.3"
+                    : isGitHub     ? "gpt-4o-mini"
                     : "gpt-4o-mini";
 
 // ── Fetch live business data and build context string ─────────
@@ -124,7 +126,7 @@ export async function POST(req: Request) {
       messages: { role: "user" | "assistant"; content: string }[];
     };
 
-    if (!isHF && !isGoogle && !isGitHub && !isGroq && !isOpenRouter && !process.env.OPENAI_API_KEY) {
+    if (!isDeepSeek && !isGroq && !isOpenRouter && !isHF && !isGitHub && !isGoogle && !process.env.OPENAI_API_KEY) {
       return Response.json(
         { error: "AI not configured. Add GOOGLE_AI_KEY to your environment variables." },
         { status: 503 }
@@ -145,7 +147,7 @@ ${businessContext}`;
 
     let reply: string;
 
-    if (isGoogle) {
+    if (isGoogle && !isDeepSeek && !isGroq) {
       // Use Google's native Generative Language API directly (avoids OpenAI compat layer rate limits)
       const model = PINNED_MODEL ?? "gemini-2.0-flash";
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_AI_KEY}`;
