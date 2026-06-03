@@ -143,16 +143,41 @@ Respond in the same language the user writes in.
 
 ${businessContext}`;
 
-    const response = await openai.chat.completions.create({
-      model:      PINNED_MODEL ?? DEFAULT_MODEL,
-      messages:   [{ role: "system", content: systemPrompt }, ...messages],
-      max_tokens: 1000,
-    }) as OpenAI.Chat.ChatCompletion;
+    let reply: string;
 
-    return Response.json({
-      reply: response.choices[0].message.content,
-      usage: response.usage,
-    });
+    if (isGoogle) {
+      // Use Google's native Generative Language API directly (avoids OpenAI compat layer rate limits)
+      const model = PINNED_MODEL ?? "gemini-2.0-flash";
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_AI_KEY}`;
+      const contents = messages.map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      }));
+      const gRes = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents,
+          generationConfig: { maxOutputTokens: 1000 },
+        }),
+      });
+      if (!gRes.ok) {
+        const errText = await gRes.text();
+        throw Object.assign(new Error(errText || `Google AI error ${gRes.status}`), { status: gRes.status });
+      }
+      const gData = await gRes.json() as { candidates: { content: { parts: { text: string }[] } }[] };
+      reply = gData.candidates[0]?.content?.parts[0]?.text ?? "Sorry, I couldn't get a response.";
+    } else {
+      const response = await openai.chat.completions.create({
+        model:    PINNED_MODEL ?? DEFAULT_MODEL,
+        messages: [{ role: "system", content: systemPrompt }, ...messages],
+        max_tokens: 1000,
+      }) as OpenAI.Chat.ChatCompletion;
+      reply = response.choices[0].message.content ?? "Sorry, I couldn't get a response.";
+    }
+
+    return Response.json({ reply });
   } catch (err) {
     const e = err as { status?: number; message?: string };
     console.error("[AI Chat]", e);
