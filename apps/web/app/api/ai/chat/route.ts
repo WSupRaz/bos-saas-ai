@@ -38,197 +38,76 @@ const DEFAULT_MODEL = isGoogle     ? "gemini-1.5-flash"
                     : isOpenRouter ? "meta-llama/llama-3.3-70b-instruct:free"
                     : "gpt-4o-mini";
 
-async function completionWithFallback(
-  params: Parameters<typeof openai.chat.completions.create>[0]
-): Promise<OpenAI.Chat.ChatCompletion> {
-  const model = PINNED_MODEL ?? DEFAULT_MODEL;
-  return openai.chat.completions.create({ ...params, model }) as Promise<OpenAI.Chat.ChatCompletion>;
-}
-
-// ── Tool definitions ─────────────────────────────────────────
-const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
-  {
-    type: "function",
-    function: {
-      name: "get_report_summary_today",
-      description: "Returns which employees/vendors submitted reports today and who is missing.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_best_supplier_today",
-      description: "Compare supplier rates submitted today and find the cheapest for a given item.",
-      parameters: {
-        type: "object",
-        properties: {
-          item: { type: "string", description: "Item name, e.g. 'wheat', 'sugar'" },
-        },
-        required: ["item"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_overdue_tasks",
-      description: "Get a list of overdue or high-priority tasks in the organisation.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_inventory_status",
-      description: "Check current stock levels. Flags items below minimum threshold.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_leads_summary",
-      description: "Return lead counts by status and list of leads needing follow-up today.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_orders_summary",
-      description: "Return recent order totals and pending order list.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-];
-
-// ── Tool executors ───────────────────────────────────────────
-async function executeTool(name: string, args: Record<string, string>, orgId: string) {
+// ── Fetch live business data and build context string ─────────
+async function getBusinessContext(orgId: string): Promise<string> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  switch (name) {
-    case "get_report_summary_today": {
-      const [users, reports] = await Promise.all([
-        prisma.user.findMany({
-          where: { organizationId: orgId, status: "ACTIVE", role: { in: ["EMPLOYEE","VENDOR","DISTRIBUTOR","MANAGER"] } },
-          select: { id: true, name: true, role: true },
-        }),
-        prisma.report.findMany({
-          where: { organizationId: orgId, date: { gte: today, lt: tomorrow } },
-          select: { submittedById: true, type: true },
-        }),
-      ]);
+  const [users, reports, tasks, inventory, leads, rates, orders] = await Promise.all([
+    prisma.user.findMany({
+      where: { organizationId: orgId, status: "ACTIVE", role: { in: ["EMPLOYEE","VENDOR","DISTRIBUTOR","MANAGER"] } },
+      select: { id: true, name: true, role: true },
+    }),
+    prisma.report.findMany({
+      where: { organizationId: orgId, date: { gte: today, lt: tomorrow } },
+      select: { submittedById: true },
+    }),
+    prisma.task.findMany({
+      where: { organizationId: orgId, status: { in: ["PENDING","IN_PROGRESS"] }, dueAt: { lt: new Date() } },
+      include: { assignee: { select: { name: true } } },
+      orderBy: { dueAt: "asc" },
+      take: 15,
+    }),
+    prisma.inventoryItem.findMany({
+      where: { organizationId: orgId },
+      orderBy: { name: "asc" },
+    }),
+    prisma.lead.groupBy({
+      by: ["status"],
+      where: { organizationId: orgId },
+      _count: { id: true },
+    }),
+    prisma.marketRate.findMany({
+      where: { organizationId: orgId, recordedAt: { gte: today } },
+      orderBy: { rate: "asc" },
+      take: 20,
+    }),
+    prisma.order.aggregate({
+      where: { organizationId: orgId, createdAt: { gte: today } },
+      _sum: { totalAmount: true },
+      _count: { id: true },
+    }),
+  ]);
 
-      const submitted = new Set(reports.map((r) => r.submittedById));
-      return {
-        submitted: users.filter((u) => submitted.has(u.id)).map((u) => u.name),
-        missing:   users.filter((u) => !submitted.has(u.id)).map((u) => u.name),
-        total:     users.length,
-        report_count: reports.length,
-      };
-    }
+  const submittedIds = new Set(reports.map((r) => r.submittedById));
+  const submitted    = users.filter((u) => submittedIds.has(u.id));
+  const missing      = users.filter((u) => !submittedIds.has(u.id));
+  const lowStock     = inventory.filter((i) => i.minThreshold !== null && i.quantity < i.minThreshold);
 
-    case "get_best_supplier_today": {
-      const rates = await prisma.marketRate.findMany({
-        where: {
-          organizationId: orgId,
-          item: { contains: args.item, mode: "insensitive" },
-          recordedAt: { gte: today },
-        },
-        orderBy: { rate: "asc" },
-      });
-      if (!rates.length) return { message: `No rates submitted today for "${args.item}".` };
-      return {
-        best_supplier: rates[0].source,
-        best_rate:     rates[0].rate,
-        unit:          rates[0].unit,
-        all_rates:     rates.map((r) => ({ source: r.source, rate: r.rate })),
-        savings_vs_worst: rates.length > 1 ? rates[rates.length - 1].rate - rates[0].rate : 0,
-      };
-    }
+  return `
+=== LIVE BUSINESS DATA (${new Date().toLocaleString()}) ===
 
-    case "get_overdue_tasks": {
-      const tasks = await prisma.task.findMany({
-        where: {
-          organizationId: orgId,
-          status: { in: ["PENDING", "IN_PROGRESS"] },
-          dueAt: { lt: new Date() },
-        },
-        include: { assignee: { select: { name: true } } },
-        orderBy: { dueAt: "asc" },
-        take: 20,
-      });
-      return {
-        count: tasks.length,
-        tasks: tasks.map((t) => ({
-          title:    t.title,
-          priority: t.priority,
-          assignee: t.assignee?.name ?? "Unassigned",
-          due:      t.dueAt?.toISOString().slice(0, 10),
-        })),
-      };
-    }
+DAILY REPORTS:
+- Submitted today: ${submitted.map((u) => u.name).join(", ") || "None"}
+- Not yet submitted: ${missing.map((u) => u.name).join(", ") || "All submitted ✓"}
 
-    case "get_inventory_status": {
-      const items = await prisma.inventoryItem.findMany({
-        where: { organizationId: orgId },
-        orderBy: { name: "asc" },
-      });
-      const low = items.filter((i) => i.minThreshold !== null && i.quantity < i.minThreshold);
-      return {
-        total_items:  items.length,
-        low_stock:    low.map((i) => ({ name: i.name, quantity: i.quantity, min: i.minThreshold, unit: i.unit })),
-        all_items:    items.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit })),
-      };
-    }
+OVERDUE TASKS (${tasks.length} total):
+${tasks.length === 0 ? "No overdue tasks." : tasks.map((t) => `- "${t.title}" | Assignee: ${t.assignee?.name ?? "Unassigned"} | Due: ${t.dueAt?.toDateString()}`).join("\n")}
 
-    case "get_leads_summary": {
-      const [leads, followUps] = await Promise.all([
-        prisma.lead.groupBy({
-          by: ["status"],
-          where: { organizationId: orgId },
-          _count: { id: true },
-        }),
-        prisma.lead.findMany({
-          where: { organizationId: orgId, followUpAt: { gte: today, lt: tomorrow } },
-          select: { name: true, phone: true, status: true },
-          take: 10,
-        }),
-      ]);
-      return {
-        by_status:   leads.map((l) => ({ status: l.status, count: l._count.id })),
-        follow_ups_today: followUps,
-      };
-    }
+INVENTORY (${inventory.length} items):
+${inventory.map((i) => `- ${i.name}: ${i.quantity} ${i.unit}${i.minThreshold && i.quantity < i.minThreshold ? " ⚠️ LOW STOCK" : ""}`).join("\n")}
+${lowStock.length > 0 ? `\nLOW STOCK ALERT: ${lowStock.map((i) => `${i.name} (${i.quantity}/${i.minThreshold} ${i.unit})`).join(", ")}` : ""}
 
-    case "get_orders_summary": {
-      const [pending, recent] = await Promise.all([
-        prisma.order.findMany({
-          where: { organizationId: orgId, status: { in: ["PENDING","CONFIRMED","PROCESSING"] } },
-          orderBy: { createdAt: "desc" },
-          take: 10,
-          select: { orderNumber: true, totalAmount: true, status: true, createdAt: true },
-        }),
-        prisma.order.aggregate({
-          where: { organizationId: orgId, createdAt: { gte: today } },
-          _sum: { totalAmount: true },
-          _count: { id: true },
-        }),
-      ]);
-      return {
-        today_orders: recent._count.id,
-        today_revenue: recent._sum.totalAmount ?? 0,
-        pending_orders: pending,
-      };
-    }
+SUPPLIER RATES TODAY:
+${rates.length === 0 ? "No rates submitted today." : rates.map((r) => `- ${r.item}: ${r.source} @ ${r.rate} per ${r.unit}`).join("\n")}
 
-    default:
-      return { error: "Unknown tool" };
-  }
+LEADS BY STATUS:
+${leads.map((l) => `- ${l.status}: ${l._count.id}`).join("\n") || "No leads data."}
+
+TODAY'S ORDERS: ${orders._count.id} orders | Revenue: ${orders._sum.totalAmount ?? 0}
+`.trim();
 }
 
 // ── Route handler ─────────────────────────────────────────────
@@ -238,62 +117,33 @@ export async function POST(req: Request) {
     requirePermission(ctx, "ai:chat");
 
     const { messages } = (await req.json()) as {
-      messages: OpenAI.Chat.ChatCompletionMessageParam[];
+      messages: { role: "user" | "assistant"; content: string }[];
     };
 
-    const org = await prisma.organization.findUnique({
-      where: { id: ctx.orgId },
-      select: { name: true },
-    });
-
-    const systemPrompt = `You are the AI business assistant for ${org?.name ?? "this organisation"}.
-You help owners and managers make smarter decisions using real-time business data.
-Always use available tools to fetch live data before answering questions about reports, rates, stock, leads, or tasks.
-Be concise, data-driven, and actionable. Respond in the same language the user writes in.
-When you find missing reports, low stock, or overdue tasks — always suggest a concrete next step.`;
-
-    if (!process.env.GROQ_API_KEY && !process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY && !process.env.GOOGLE_AI_KEY) {
+    if (!isGoogle && !isGitHub && !isGroq && !isOpenRouter && !process.env.OPENAI_API_KEY) {
       return Response.json(
-        { error: "AI not configured. Add GROQ_API_KEY to your environment variables." },
+        { error: "AI not configured. Add GOOGLE_AI_KEY to your environment variables." },
         { status: 503 }
       );
     }
 
-    let response = await completionWithFallback({
-      model:       DEFAULT_MODEL,
-      messages:    [{ role: "system", content: systemPrompt }, ...messages],
-      tools:       TOOLS,
-      tool_choice: "auto",
-      max_tokens:  1000,
-    });
+    const [org, businessContext] = await Promise.all([
+      prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { name: true } }),
+      getBusinessContext(ctx.orgId),
+    ]);
 
-    // Agentic loop — keep calling tools until the model stops
-    while (response.choices[0].finish_reason === "tool_calls") {
-      const toolCalls = response.choices[0].message.tool_calls!;
+    const systemPrompt = `You are the AI business assistant for ${org?.name ?? "this organisation"}.
+You have access to real-time business data shown below. Use it to answer questions accurately.
+Be concise, data-driven, and actionable. Suggest next steps when you spot issues.
+Respond in the same language the user writes in.
 
-      const toolResults = await Promise.all(
-        toolCalls.map(async (tc) => {
-          const args   = JSON.parse(tc.function.arguments) as Record<string, string>;
-          const result = await executeTool(tc.function.name, args, ctx.orgId);
-          return {
-            tool_call_id: tc.id,
-            role:         "tool" as const,
-            content:      JSON.stringify(result),
-          };
-        })
-      );
+${businessContext}`;
 
-      response = await completionWithFallback({
-        model:    DEFAULT_MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages,
-          response.choices[0].message,
-          ...toolResults,
-        ],
-        tools: TOOLS,
-      });
-    }
+    const response = await openai.chat.completions.create({
+      model:      PINNED_MODEL ?? DEFAULT_MODEL,
+      messages:   [{ role: "system", content: systemPrompt }, ...messages],
+      max_tokens: 1000,
+    }) as OpenAI.Chat.ChatCompletion;
 
     return Response.json({
       reply: response.choices[0].message.content,
@@ -301,6 +151,7 @@ When you find missing reports, low stock, or overdue tasks — always suggest a 
     });
   } catch (err) {
     const e = err as { status?: number; message?: string };
-    return Response.json({ error: e.message }, { status: e.status ?? 500 });
+    console.error("[AI Chat]", e);
+    return Response.json({ error: e.message ?? "AI request failed" }, { status: e.status ?? 500 });
   }
 }
