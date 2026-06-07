@@ -48,10 +48,10 @@ export async function GET(req: NextRequest) {
 
     // If compare mode: group by item, find best rate per item today
     if (compareToday) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      // Use last 48 hours so rates seeded any time in the past two days are visible
+      const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
 
-      const todayRates = rates.filter((r) => r.recordedAt >= today);
+      const todayRates = rates.filter((r) => r.recordedAt >= cutoff);
       const grouped = todayRates.reduce<Record<string, typeof todayRates>>((acc, r) => {
         if (!acc[r.item]) acc[r.item] = [];
         acc[r.item].push(r);
